@@ -1,0 +1,2 @@
+主程序为roadseg.py，其中可以进行train和test两个操作,181行改为false即可测试
+注意修改pth路径及各种相关路径
