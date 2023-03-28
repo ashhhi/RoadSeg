@@ -1,22 +1,21 @@
 import os
 import cv2
+import random
 import numpy as np
 import pandas as pd
-import random, tqdm
-import seaborn as sns
 import matplotlib.pyplot as plt
 import warnings
 import segmentation_models_pytorch as smp
 warnings.filterwarnings("ignore")
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader
 import albumentations as album
+from setting import DATA_DIR, LABEL_DIR, SEED, TRAINING
 
 class RoadsDataset(torch.utils.data.Dataset):
-    def __init__(self, df, class_rgb_values=None, augmentation=None, preprocessing=None, ):
-        self.image_paths = df['sat_image_path'].tolist()
-        self.mask_paths = df['mask_path'].tolist()
+    def __init__(self, image_paths, label_paths, class_rgb_values=None, augmentation=None, preprocessing=None, ):
+        self.image_paths = image_paths
+        self.mask_paths = label_paths
         self.class_rgb_values = class_rgb_values
         self.augmentation = augmentation
         self.preprocessing = preprocessing
@@ -118,19 +117,22 @@ def reverse_one_hot(image):
 
 
 if __name__ == '__main__':
-    print('test8')
-    DATA_DIR = '/home/dxy/wmw/data/Kvasir dataset/train'
-    metadata_df = pd.read_csv('/home/dxy/wmw/code/sar/sar_pre/metadata_kvasir.csv')
-    # print(metadata_df)
-   # metadata_df = metadata_df[metadata_df['split'] == 'train']
-    metadata_df = metadata_df[['image_id', 'sat_image_path', 'mask_path']]
-    metadata_df['sat_image_path'] = metadata_df['sat_image_path'].apply(lambda img_pth: os.path.join(DATA_DIR, img_pth))
-    metadata_df['mask_path'] = metadata_df['mask_path'].apply(lambda img_pth: os.path.join(DATA_DIR, img_pth))
-    # Shuffle DataFrame
-    metadata_df = metadata_df.sample(frac=1).reset_index(drop=True)
-    # print(metadata_df)
+    metadata = []
+    metalabel = []
+    for filename in os.listdir(DATA_DIR):
+        name = filename.split('.')[0]
+        for filename1 in os.listdir(LABEL_DIR):
+            if filename1.split('.')[0] == name:
+                metadata.append(os.path.join(DATA_DIR,filename))
+                metalabel.append(os.path.join(LABEL_DIR,filename1))
 
-    class_dict = pd.read_csv('/home/dxy/wmw/code/sar/class_dict.csv')
+    # 打乱数据集
+    random.seed(SEED)
+    random.shuffle(metadata)
+    random.seed(SEED)
+    random.shuffle(metalabel)
+
+    class_dict = pd.read_csv(r'class_dict.csv')
     # Get class names  sd
     class_names = class_dict['name'].tolist()
     # Get class RGB values
@@ -141,18 +143,19 @@ if __name__ == '__main__':
     select_class_indices = [class_names.index(cls.lower()) for cls in select_classes]
     select_class_rgb_values = np.array(class_rgb_values)[select_class_indices]
 
-    # Perform 90/10 split for train / val
-    valid_df = metadata_df.sample(frac=0.1, random_state=42)
-    train_df = metadata_df.drop(valid_df.index)
-
-    print(valid_df)
+    # 九比一划分训练集和测试集
+    index = int(len(metadata) / 10)
+    train = metadata[index:]
+    train_label = metalabel[index:]
+    valid = metadata[:index]
+    valid_label = metalabel[:index]
 
     ENCODER = 'efficientnet-b7'  # resnet50,
     ENCODER_WEIGHTS = 'imagenet'
     CLASSES = select_classes
     ACTIVATION = 'sigmoid'  # could be None for logits or 'softmax2d' for multiclass segmentation
 
-    # create segmentation model with pretrained encoder
+    # 用预训练好的encoder创建分割模型
     model = smp.UnetPlusPlus(  #Unet, UnetPlusPlus, MAnet, Linknet, FPN, PSPNet, DeepLabV3, DeepLabV3Plus, PAN
         encoder_name=ENCODER,
         encoder_weights=ENCODER_WEIGHTS,
@@ -162,13 +165,15 @@ if __name__ == '__main__':
 
     preprocessing_fn = smp.encoders.get_preprocessing_fn(ENCODER, ENCODER_WEIGHTS)
 
-    train_dataset = RoadsDataset(train_df,
+    train_dataset = RoadsDataset(image_paths=train,
+                                 label_paths=train_label,
                                  augmentation=get_training_augmentation(),
                                  preprocessing=get_preprocessing(preprocessing_fn),
                                  class_rgb_values=select_class_rgb_values,
                                  )
 
-    valid_dataset = RoadsDataset(valid_df,
+    valid_dataset = RoadsDataset(image_paths=valid,
+                                 label_paths=valid_label,
                                  augmentation=get_valid_augmentation(),
                                  preprocessing=get_preprocessing(preprocessing_fn),
                                  class_rgb_values=select_class_rgb_values,
@@ -178,7 +183,6 @@ if __name__ == '__main__':
     valid_loader = DataLoader(valid_dataset, batch_size=4, shuffle=False, num_workers=0, drop_last=True)
 
     # Set flag to train the model or not. If set to 'False', only prediction is performed (using an older model checkpoint)
-    TRAINING = True
 
     # Set num of epochs
     EPOCHS = 40
@@ -257,14 +261,16 @@ if __name__ == '__main__':
             print('Loaded DeepLabV3+ model from this run.')
 
         test_dataset = RoadsDataset(
-            metadata_df,
+            image_paths=metadata,
+            label_paths=metalabel,
             augmentation=get_valid_augmentation(),
             preprocessing=get_preprocessing(preprocessing_fn),
             class_rgb_values=select_class_rgb_values,
         )
         # test dataset for visualization (without preprocessing augmentations & transformations)
         test_dataset_vis = RoadsDataset(
-            metadata_df,
+            image_paths=metadata,
+            label_paths=metalabel,
             augmentation=get_valid_augmentation(),
             class_rgb_values=select_class_rgb_values,
         )
