@@ -10,7 +10,7 @@ warnings.filterwarnings("ignore")
 import torch
 from torch.utils.data import DataLoader
 import albumentations as album
-from setting import DATA_DIR, LABEL_DIR, SEED, TRAINING
+from roadseg.attributes.setting import DATA_DIR, LABEL_DIR, SEED, TRAINING
 
 class RoadsDataset(torch.utils.data.Dataset):
     def __init__(self, image_paths, label_paths, class_rgb_values=None, augmentation=None, preprocessing=None, ):
@@ -64,12 +64,13 @@ def get_valid_augmentation():
 
 
 def to_tensor(x, **kwargs):
-    return x.transpose(2, 0, 1).astype('float32')
+    return x.transpose(2, 0, 1).astype('float32')   # transpose转置，0.1.2分别表示xyz轴
 
 
 def get_preprocessing(preprocessing_fn=None):
     _transform = []
     if preprocessing_fn:
+        # albumentations 是一个数据增强工具
         _transform.append(album.Lambda(image=preprocessing_fn))
     _transform.append(album.Lambda(image=to_tensor, mask=to_tensor))
     return album.Compose(_transform)
@@ -132,7 +133,7 @@ if __name__ == '__main__':
     random.seed(SEED)
     random.shuffle(metalabel)
 
-    class_dict = pd.read_csv(r'class_dict.csv')
+    class_dict = pd.read_csv(r'attributes/class_dict.csv')
     # Get class names  sd
     class_names = class_dict['name'].tolist()
     # Get class RGB values
@@ -234,12 +235,14 @@ if __name__ == '__main__':
         device=DEVICE,
         verbose=True,
     )
+
+
+
     if TRAINING:
         best_iou_score = 0.0
         train_logs_list, valid_logs_list = [], []
 
         for i in range(0, EPOCHS):
-
             # Perform training & validation
             print('\nEpoch: {}'.format(i))
             train_logs = train_epoch.run(train_loader)
