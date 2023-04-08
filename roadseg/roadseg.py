@@ -10,7 +10,7 @@ warnings.filterwarnings("ignore")
 import torch
 from torch.utils.data import DataLoader
 import albumentations as album
-from roadseg.attributes.setting import DATA_DIR, LABEL_DIR, SEED, TRAINING
+from attributes.setting import DATA_DIR, LABEL_DIR, SEED, TRAINING, PRED_DIR
 
 class RoadsDataset(torch.utils.data.Dataset):
     def __init__(self, image_paths, label_paths, class_rgb_values=None, augmentation=None, preprocessing=None, ):
@@ -158,9 +158,9 @@ if __name__ == '__main__':
 
     # 用预训练好的encoder创建分割模型
     model = smp.UnetPlusPlus(  #Unet, UnetPlusPlus, MAnet, Linknet, FPN, PSPNet, DeepLabV3, DeepLabV3Plus, PAN
-        encoder_name=ENCODER,
-        encoder_weights=ENCODER_WEIGHTS,
-        classes=len(CLASSES),
+        encoder_name=ENCODER,   # 选择解码器
+        encoder_weights=ENCODER_WEIGHTS,    # 使用预先训练的权重imagenet进行解码器初始化
+        classes=len(CLASSES),   # 模型输出通道（数据集所分的类别总数）
         activation=ACTIVATION,
     )
 
@@ -210,12 +210,12 @@ if __name__ == '__main__':
 
     # define learning rate scheduler (not used in this NB)
     lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer, T_0=3, T_mult=2, eta_min=5e-5,
+        optimizer, T_0=3, T_mult=2, eta_min=int(5e-5),
     )
 
     # load best saved model checkpoint from previous commit (if present)
-    if os.path.exists('outputs/best_model.pth'):
-        model = torch.load('outputs/best_model.pth',
+    if os.path.exists('saved/best_model.pth'):
+        model = torch.load('saved/best_model.pth',
                            map_location=DEVICE)
         print('Loaded pre-trained DeepLabV3+ model!')
 
@@ -255,13 +255,15 @@ if __name__ == '__main__':
             print("valid IOU,acc,f1,precision,recall is:", valid_logs['iou_score'])
             if best_iou_score < valid_logs['iou_score']:
                 best_iou_score = valid_logs['iou_score']
-                torch.save(model, './best_model_k_1.pth')
+                torch.save(model, './saved/best_model.pth')
                 print('Model saved!')
     else:
         # load best saved model checkpoint from the current run
-        if os.path.exists('./best_model.pth'):
-            best_model = torch.load('./best_model.pth', map_location=DEVICE)
+        if os.path.exists('./saved/best_model.pth'):
+            best_model = torch.load('./saved/best_model.pth', map_location=DEVICE)
             print('Loaded DeepLabV3+ model from this run.')
+        else:
+            assert False, 'No Model!'
 
         test_dataset = RoadsDataset(
             image_paths=metadata,
@@ -278,16 +280,17 @@ if __name__ == '__main__':
             class_rgb_values=select_class_rgb_values,
         )
 
-        sample_preds_folder = '/data1/wmw/dataset/pre/'
-        if not os.path.exists(sample_preds_folder):
-            os.makedirs(sample_preds_folder)
 
-        print(len(test_dataset))
-
+        num = 0
+        while True:
+            if not os.path.exists(os.path.join(PRED_DIR,f'exp{num}')):
+                os.makedirs(os.path.join(PRED_DIR,f'exp{num}'))
+                break
+            else:
+                num += 1
         for idx in range(len(test_dataset)):
-            print("starting test ", idx)
+            print("starting test:", idx)
             image, gt_mask = test_dataset[idx]
-            print(gt_mask)
             image_vis = test_dataset_vis[idx][0].astype('uint8')
             x_tensor = torch.from_numpy(image).to(DEVICE).unsqueeze(0)
             # Predict test image
@@ -300,11 +303,8 @@ if __name__ == '__main__':
             pred_mask = colour_code_segmentation(reverse_one_hot(pred_mask), select_class_rgb_values)
             # Convert gt_mask from `CHW` format to `HWC` format
             gt_mask = np.transpose(gt_mask, (1, 2, 0))
-            print(gt_mask)
             gt_mask = colour_code_segmentation(reverse_one_hot(gt_mask), select_class_rgb_values)
-            print(gt_mask)
-            cv2.imwrite(os.path.join(sample_preds_folder, f"sample_pred_{idx}.png"),
-                        np.hstack([image_vis, gt_mask, pred_mask])[:, :, ::-1])
+            cv2.imwrite(os.path.join(PRED_DIR,f"exp{num}/pred_{idx}.png"),np.hstack([image_vis, gt_mask, pred_mask])[:, :, ::-1])
 
 
 

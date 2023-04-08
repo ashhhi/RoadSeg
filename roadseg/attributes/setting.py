@@ -4,6 +4,7 @@ TRAINING = True
 # 数据路径
 DATA_DIR = r'C:\DataSet\roadseg\train'
 LABEL_DIR = r'C:\DataSet\roadseg\gt'
+PRED_DIR = r'C:\DataSet\roadseg\pred'
 
 # 随机种子，打乱数据集
 SEED = 424
