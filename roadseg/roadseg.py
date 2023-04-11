@@ -180,7 +180,7 @@ if __name__ == '__main__':
                                  class_rgb_values=select_class_rgb_values,
                                  )
     # Get train and val data loaders
-    train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, num_workers=0, drop_last=True)
+    train_loader = DataLoader(train_dataset, batch_size=4, shuffle=False, num_workers=0, drop_last=True)
     valid_loader = DataLoader(valid_dataset, batch_size=4, shuffle=False, num_workers=0, drop_last=True)
 
     # Set flag to train the model or not. If set to 'False', only prediction is performed (using an older model checkpoint)
