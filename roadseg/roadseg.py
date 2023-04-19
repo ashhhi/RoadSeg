@@ -10,7 +10,7 @@ warnings.filterwarnings("ignore")
 import torch
 from torch.utils.data import DataLoader
 import albumentations as album
-from attributes.setting import DATA_DIR, LABEL_DIR, SEED, TRAINING, PRED_DIR
+from attributes.setting import DATA_DIR, LABEL_DIR, TRAINING, PRED_DIR
 
 class RoadsDataset(torch.utils.data.Dataset):
     def __init__(self, image_paths, label_paths, class_rgb_values=None, augmentation=None, preprocessing=None, ):
@@ -22,9 +22,10 @@ class RoadsDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, i):
         # read images and masks
-        #print(self.image_paths[i])
-        image = cv2.cvtColor(cv2.imread(self.image_paths[i]), cv2.COLOR_BGR2RGB)
-        mask = cv2.cvtColor(cv2.imread(self.mask_paths[i]), cv2.COLOR_BGR2RGB)
+        image = cv2.imread(self.image_paths[i])
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        mask = cv2.imread(self.mask_paths[i])
+        mask = cv2.cvtColor(mask, cv2.COLOR_BGR2RGB)
 
         # one-hot-encode the mask
         mask = one_hot_encode(mask, self.class_rgb_values).astype('float')
@@ -38,13 +39,11 @@ class RoadsDataset(torch.utils.data.Dataset):
         if self.preprocessing:
             sample = self.preprocessing(image=image, mask=mask)
             image, mask = sample['image'], sample['mask']
-
         return image, mask
 
     def __len__(self):
         # return length of
         return len(self.image_paths)
-
 
 # album.Resize((256, 256)),
 def get_training_augmentation():
@@ -83,23 +82,6 @@ def colour_code_segmentation(image, label_values):
     return x
 
 
-# helper function for data visualization
-def visualize(**images):
-    """
-    Plot images in one row
-    """
-    n_images = len(images)
-    plt.figure(figsize=(20, 8))
-    for idx, (name, image) in enumerate(images.items()):
-        plt.subplot(1, n_images, idx + 1)
-        plt.xticks([])
-        plt.yticks([])
-        # get title from the parameter names
-        plt.title(name.replace('_', ' ').title(), fontsize=20)
-        plt.imshow(image)
-    plt.savefig('squares_plot.png', bbox_inches='tight')
-
-
 def one_hot_encode(label, label_values):
     semantic_map = []
     for colour in label_values:
@@ -127,12 +109,6 @@ if __name__ == '__main__':
                 metadata.append(os.path.join(DATA_DIR,filename))
                 metalabel.append(os.path.join(LABEL_DIR,filename1))
 
-    # 打乱数据集
-    random.seed(SEED)
-    random.shuffle(metadata)
-    random.seed(SEED)
-    random.shuffle(metalabel)
-
     class_dict = pd.read_csv(r'attributes/class_dict.csv')
     # Get class names  sd
     class_names = class_dict['name'].tolist()
@@ -157,32 +133,34 @@ if __name__ == '__main__':
     ACTIVATION = 'sigmoid'  # could be None for logits or 'softmax2d' for multiclass segmentation
 
     # 用预训练好的encoder创建分割模型
-    model = smp.UnetPlusPlus(  #Unet, UnetPlusPlus, MAnet, Linknet, FPN, PSPNet, DeepLabV3, DeepLabV3Plus, PAN
+    model = smp.DeepLabV3Plus(  #Unet, UnetPlusPlus, MAnet, Linknet, FPN, PSPNet, DeepLabV3, DeepLabV3Plus, PAN
         encoder_name=ENCODER,   # 选择解码器
         encoder_weights=ENCODER_WEIGHTS,    # 使用预先训练的权重imagenet进行解码器初始化
         classes=len(CLASSES),   # 模型输出通道（数据集所分的类别总数）
         activation=ACTIVATION,
     )
 
-    preprocessing_fn = smp.encoders.get_preprocessing_fn(ENCODER, ENCODER_WEIGHTS)
+    # 所有模型均具有预训练的编码器，因此必须按照权重预训练的相同方法准备数据
+    preprocessing_fn = smp.encoders.get_preprocessing_fn(ENCODER, pretrained=ENCODER_WEIGHTS)
 
+    # 加载训练数据集
     train_dataset = RoadsDataset(image_paths=train,
                                  label_paths=train_label,
                                  augmentation=get_training_augmentation(),
                                  preprocessing=get_preprocessing(preprocessing_fn),
                                  class_rgb_values=select_class_rgb_values,
                                  )
-
+    # 加载验证数据集
     valid_dataset = RoadsDataset(image_paths=valid,
                                  label_paths=valid_label,
                                  augmentation=get_valid_augmentation(),
                                  preprocessing=get_preprocessing(preprocessing_fn),
                                  class_rgb_values=select_class_rgb_values,
                                  )
-    # Get train and val data loaders
-    train_loader = DataLoader(train_dataset, batch_size=4, shuffle=False, num_workers=0, drop_last=True)
-    valid_loader = DataLoader(valid_dataset, batch_size=4, shuffle=False, num_workers=0, drop_last=True)
 
+    # Get train and val data loaders
+    train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, num_workers=0, drop_last=True)
+    valid_loader = DataLoader(valid_dataset, batch_size=4, shuffle=False, num_workers=0, drop_last=True)
     # Set flag to train the model or not. If set to 'False', only prediction is performed (using an older model checkpoint)
 
     # Set num of epochs
@@ -205,17 +183,15 @@ if __name__ == '__main__':
 
     # define optimizer
     optimizer = torch.optim.Adam([
-        dict(params=model.parameters(), lr=0.00008),
+        dict(params=model.parameters(), lr=0.0001),
     ])
 
-    # define learning rate scheduler (not used in this NB)
-    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer, T_0=3, T_mult=2, eta_min=int(5e-5),
-    )
-
+    valid_logs = None
     # load best saved model checkpoint from previous commit (if present)
     if os.path.exists('saved/best_model.pth'):
         model = torch.load('saved/best_model.pth',
+                           map_location=DEVICE)
+        valid_logs = torch.load('saved/best_valid_logs.pth',
                            map_location=DEVICE)
         print('Loaded pre-trained DeepLabV3+ model!')
 
@@ -239,27 +215,29 @@ if __name__ == '__main__':
 
 
     if TRAINING:
-        best_iou_score = 0.0
+        if valid_logs != None:
+            best_iou_score = valid_logs['iou_score']
+        else:
+            best_iou_score = 0.0
         train_logs_list, valid_logs_list = [], []
 
         for i in range(0, EPOCHS):
             # Perform training & validation
             print('\nEpoch: {}'.format(i))
             train_logs = train_epoch.run(train_loader)
-            print("train IOU is:", train_logs['iou_score'])
             valid_logs = valid_epoch.run(valid_loader)
             train_logs_list.append(train_logs)
             valid_logs_list.append(valid_logs)
 
             # Save model if a better val IoU score is obtained
-            print("valid IOU,acc,f1,precision,recall is:", valid_logs['iou_score'])
             if best_iou_score < valid_logs['iou_score']:
                 best_iou_score = valid_logs['iou_score']
-                torch.save(model, './saved/best_model.pth')
+                torch.save(model, 'saved/best_model.pth')
+                torch.save(valid_logs, 'saved/best_valid_logs.pth')
                 print('Model saved!')
     else:
         # load best saved model checkpoint from the current run
-        if os.path.exists('./saved/best_model.pth'):
+        if os.path.exists('saved/best_model.pth'):
             best_model = torch.load('./saved/best_model.pth', map_location=DEVICE)
             print('Loaded DeepLabV3+ model from this run.')
         else:

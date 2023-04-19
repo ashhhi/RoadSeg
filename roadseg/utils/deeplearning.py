@@ -21,7 +21,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 from pytorch_toolbelt import losses as L
-from utils.utils import AverageMeter, second2time, inial_logger
+from utils import AverageMeter, second2time, inial_logger
 from albumentations.augmentations import functional as F
 from .metric import IOUMetric
 from torch.cuda.amp import autocast, GradScaler  # need pytorch>1.6

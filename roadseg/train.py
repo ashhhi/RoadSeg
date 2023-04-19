@@ -10,6 +10,7 @@ from torch.cuda.amp import autocast
 from utils.MPResNet import MPResNet as Net
 from models.UNet_3Plus import UNet_3Plus
 import segmentation_models_pytorch as smp
+from attributes.setting import ROOT_DIR
 
 Image.MAX_IMAGE_PIXELS = 1000000000000000
 
@@ -18,8 +19,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 device = torch.device("cuda")
 
 # 准备数据集
-# data_dir = r'D:\SAR/SAR/SARSeg-main/datasets/'
-data_dir = r'D:\SAR/Sarsegment/datasets/'
+data_dir = ROOT_DIR
 # data_dir = 'dataset/'
 train_imgs_dir = os.path.join(data_dir, "train/image/")
 val_imgs_dir = os.path.join(data_dir, "val/image/")
@@ -52,7 +52,6 @@ class seg_qyl(nn.Module):
         return x
 
 
-#
 model_name = 'efficientnet-b7'  # xception
 
 n_class = 1
